@@ -1,6 +1,17 @@
 <!--
 # Changelog
 
+## [0.3.0] - 2026-09-21
+### Added
+- Topic 3 (Static/Dynamic Arrays, 2D Lists, & Memory Structures) Python code
+- Plant extended with emoji/cost/quantity; update_dropdown static helper
+- Clickable garden tiles that dispatch to Python handle_tile_click
+- setTile / clearTile bridges for per-plant emoji display
+### Changed
+- Topic 3 reuses Plant from Topic 12 (no SeedBag); shorter student-friendly code
+- addPlantsToDropdown accepts optional quantity (4th element)
+- APP_VERSION bumped for new backward-compatible feature
+
 ## [0.2.0] - 2026-09-21
 ### Added
 - Topic 1 (Action History Stack) and Topic 2 (Climate Queue) Python code
@@ -64,7 +75,6 @@
         </div>
     </header>
     <main class="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-4 flex-grow">
-        <!-- LEFT: RESOURCES -->
         <section id="resources-section" class="lg:col-span-3 glass-panel rounded-2xl p-4">
             <h2 class="text-base font-bold text-emerald-200 border-b border-[#43533c]/30 pb-2 mb-4 flex items-center gap-2">
                 <i data-lucide="database" class="w-4 h-4 text-emerald-400"></i> Resource Storage
@@ -114,23 +124,20 @@
                 </div>
             </div>
         </section>
-        <!-- CENTER -->
         <section class="lg:col-span-6 flex flex-col gap-4">
             <div class="flex bg-[#192218] p-1.5 rounded-xl border border-emerald-800/40 w-fit">
                 <button onclick="switchTab('game')" id="tab-game" class="px-4 py-1.5 rounded-lg text-xs font-bold bg-[#283623] text-emerald-100">Interactive Sanctuary</button>
                 <button onclick="switchTab('code')" id="tab-code" class="px-4 py-1.5 rounded-lg text-xs font-bold text-emerald-400/80 hover:text-emerald-100">Student Code Editor</button>
             </div>
-
             <div id="view-game" class="glass-panel rounded-2xl p-6 min-h-[380px]">
                 <div class="flex items-center justify-between mb-4">
                     <div>
                         <h2 class="text-lg font-bold text-white">Sanctuary Garden Grid</h2>
-                        <p class="text-xs text-emerald-300">Click empty soil tiles to plant.</p>
+                        <p class="text-xs text-emerald-300">Click empty soil tiles to plant. Click planted tiles to harvest.</p>
                     </div>
                     <div class="flex items-center gap-2">
                         <span class="text-xs text-emerald-300">Seed Bag:</span>
-                        <select id="crop-selector" class="bg-[#1b2219] border border-emerald-700 text-emerald-100 text-sm rounded-xl px-3 py-2">
-                        </select>
+                        <select id="crop-selector" class="bg-[#1b2219] border border-emerald-700 text-emerald-100 text-sm rounded-xl px-3 py-2"></select>
                     </div>
                 </div>
                 <div id="garden-grid" class="grid grid-cols-5 gap-3"></div>
@@ -147,7 +154,6 @@
                 <div id="output-console" class="mt-4 bg-black/70 border border-emerald-900 rounded-xl p-4 text-xs max-h-48 overflow-auto font-mono whitespace-pre-wrap"></div>
             </div>
         </section>
-        <!-- RIGHT PANEL -->
         <section class="lg:col-span-3 flex flex-col gap-4">
             <div id="climate-queue-panel" class="glass-panel rounded-2xl p-4">
                 <h3 class="font-bold text-emerald-400 mb-3 flex items-center gap-2">
@@ -175,17 +181,12 @@
         // PATCH: bug fix or small tweak with no new feature
         // Use 0.x.y while in development; move to 1.0.0 once all 11 topics are complete.
         // =====================================================================
-        const APP_VERSION = "0.2.0";
+        const APP_VERSION = "0.3.0";
 
         let pyodideInstance = null;
         let gardenPlants = {};
-        // Display-only list of action labels (populated by Python via pushAction). No JS game logic.
         let displayActionHistory = [];
 
-        // =====================================================================
-        // TOPIC TEMPLATES — paste your Python for each topic into the matching entry.
-        // Call the bridge functions from your Python to update the UI.
-        // =====================================================================
         const topicTemplates = {
             1: {
                 title: "Python OOP + Big O + Stacks",
@@ -249,28 +250,131 @@ print("Climate Queue (FIFO) ready!")
             },
             3: {
                 title: "Static/Dynamic Arrays, 2D Lists, & Memory Structures",
-                code: `# Topic 3: Static/Dynamic Arrays, 2D Lists, & Memory Structures
-class Plant:
-    def __init__(self, name, water_need):
-        self.name = name
-        self.water_need = water_need
-        self.health = 100
+                code: `# Topic 3: Static / Dynamic Arrays, 2D Lists, and Memory
+# Prerequisite: run Topic 12 first (it defines the Plant class).
 
-    updateResources(
-        water = 200,
-        seeds = 90,
-        energy = 110,
-        hope = 80,
-        coins = 999
-        )
+if "Plant" not in globals():
+    print("Run Topic 12 first (it defines Plant and the seed bank).")
+    raise SystemExit
 
-    addPlantsToDropdown ([
-        ("Sunflower", "🌻", 999),
-        ("Rose", "🌹", 150),
-        ("Daisy", "🌼", 500),
-    ])
 
-    print("Resource Storage and Plant dropdown unclocked!")
+# DYNAMIC ARRAY: a list that doubles its capacity when full
+class DynamicArray:
+    def __init__(self):
+        self.capacity = 4
+        self.size = 0                        # slots actually used
+        self.data = [None] * self.capacity
+
+    def get(self, index):
+        return self.data[index]              # O(1)
+
+    def grow(self):
+        # O(n) - copy everything into a list twice as big
+        self.capacity = self.capacity * 2
+        bigger = [None] * self.capacity
+        for i in range(self.size):
+            bigger[i] = self.data[i]
+        self.data = bigger
+
+    def append(self, item):
+        # Amortized O(1) - slow only when we grow
+        if self.size == self.capacity:
+            self.grow()
+        self.data[self.size] = item
+        self.size += 1
+
+    def remove_at(self, index):
+        # O(n) - shift everything left to fill the gap
+        for i in range(index, self.size - 1):
+            self.data[i] = self.data[i + 1]
+        self.data[self.size - 1] = None
+        self.size -= 1
+
+    def find_by_name(self, name):
+        # O(n) - check each item until we find a match
+        for i in range(self.size):
+            if self.data[i].name == name:
+                return i
+        return -1
+
+
+# GARDEN GRID: static 5x5 2D list, never resized (cells are only overwritten)
+# BUG to avoid: [[None]*5]*5 makes every row the SAME list.
+# Always build a fresh list per row.
+class GardenGrid:
+    def __init__(self):
+        self.cells = [[None for _ in range(5)] for _ in range(5)]
+
+    def to_index(self, row, col):
+        return row * 5 + col                 # O(1) row-major flat position
+
+    def to_row_col(self, pos):
+        return (pos // 5, pos % 5)           # O(1) flat position -> (row, col)
+
+    def in_bounds(self, row, col):
+        return 0 <= row < 5 and 0 <= col < 5
+
+
+seed_array = DynamicArray()                  # holds Plant objects
+grid = GardenGrid()
+resources = {"water": 200, "seeds": 0, "energy": 110, "hope": 65, "coins": 120}
+
+for pos in range(25):
+    clearTile(pos)                           # start with an empty display
+
+
+def update_display():
+    plant_list = []
+    total = 0
+    for i in range(seed_array.size):
+        plant = seed_array.get(i)
+        plant_list.append(plant)
+        total += plant.quantity
+    resources["seeds"] = total
+    updateResources(resources["water"], resources["seeds"], resources["energy"], resources["hope"], resources["coins"])
+    Plant.update_dropdown(plant_list)
+
+
+def handle_tile_click(pos, crop_name):
+    row, col = grid.to_row_col(int(pos))
+    cell = grid.cells[row][col]
+
+    # Occupied tile -> harvest it
+    if cell is not None:
+        grid.cells[row][col] = None
+        clearTile(pos)
+        pushAction("Harvested " + cell.emoji + " at (" + str(row) + ", " + str(col) + ")")
+        return
+
+    # Empty tile -> plant the selected seed
+    index = seed_array.find_by_name(crop_name)
+    if index < 0:
+        print("Cannot plant: " + str(crop_name) + " is not in the seed array.")
+        return
+
+    plant = seed_array.get(index)
+    grid.cells[row][col] = plant
+    plant.quantity -= 1
+    if plant.quantity == 0:
+        seed_array.remove_at(index)          # empty entry leaves the array
+
+    setTile(pos, plant.emoji)
+    pushAction("Planted " + plant.emoji + " at (" + str(row) + ", " + str(col) + ")")
+    update_display()
+
+
+# Add 5 plants (the array grows from capacity 4 to 8)
+for plant in [
+    Plant("Sunflower", 10, emoji="🌻", cost=10, quantity=5),
+    Plant("Rose", 12, emoji="🌹", cost=15, quantity=3),
+    Plant("Daisy", 8, emoji="🌼", cost=8, quantity=4),
+    Plant("Tulip", 9, emoji="🌷", cost=12, quantity=2),
+    Plant("Lavender", 7, emoji="💜", cost=20, quantity=1),
+]:
+    seed_array.append(plant)
+
+update_display()
+print("Garden Grid & Seed Array ready!")
 `
             },
             4: {
@@ -320,6 +424,41 @@ class Plant:
                 code: `# Topic 11: Dynamic Programming (DP), Memoization, & Divide-and-Conquer
 # ==== WRITE YOUR CODE HERE ====
 `
+            },
+            12: {
+                title: "Resource Storage and Seed Bank",
+                code: `# Topic 12: Resource Storage and Seed Bank
+# One Plant object = one seed type in the bag.
+
+class Plant:
+    def __init__(self, name, water_need, health=100, emoji="🌱", cost=0, quantity=1):
+        self.name = name
+        self.water_need = water_need
+        self.health = health
+        self.emoji = emoji
+        self.cost = cost
+        self.quantity = quantity
+
+    @staticmethod
+    def update_dropdown(plants):
+        # Send [name, emoji, cost, quantity] rows to the existing JS bridge.
+        rows = []
+        for p in plants:
+            rows.append([p.name, p.emoji, p.cost, p.quantity])
+        addPlantsToDropdown(rows)
+
+    @staticmethod
+    def setup_demo():
+        updateResources(200, 90, 110, 80, 999)
+        Plant.update_dropdown([
+            Plant("Sunflower", 10, emoji="🌻", cost=999, quantity=1),
+            Plant("Rose", 12, emoji="🌹", cost=150, quantity=1),
+            Plant("Daisy", 8, emoji="🌼", cost=500, quantity=1),
+        ])
+        print("Resource Storage and Plant dropdown unlocked!")
+
+Plant.setup_demo()
+`
             }
         };
 
@@ -331,12 +470,13 @@ class Plant:
             }
             try {
                 pyodideInstance = await loadPyodide();
-                // Bridge functions Python may call (pure display — no game rules)
                 pyodideInstance.globals.set("addPlantToGrid", addPlantToGrid);
                 pyodideInstance.globals.set("updateResources", updateResources);
                 pyodideInstance.globals.set("addPlantsToDropdown", addPlantsToDropdown);
                 pyodideInstance.globals.set("pushAction", pushAction);
                 pyodideInstance.globals.set("updateClimateQueue", updateClimateQueue);
+                pyodideInstance.globals.set("setTile", setTile);
+                pyodideInstance.globals.set("clearTile", clearTile);
                 await pyodideInstance.runPythonAsync(`
                     import sys
                     from js import document
@@ -360,15 +500,13 @@ class Plant:
             }
         }
 
-        // ---- Pure display bridges (called from Python) ----
-
-        // updateClimateQueue(events: list of strings)
-        // Renders the FIFO climate events. Pass an empty list to clear.
         function updateClimateQueue(events) {
             const container = document.getElementById("climate-queue");
             container.innerHTML = "";
-            if (!events || !events.length) return;
-            events.forEach(event => {
+            if (!events) return;
+            const list = (typeof events.toJs === "function") ? events.toJs() : events;
+            if (!list.length) return;
+            list.forEach(event => {
                 const div = document.createElement("div");
                 div.className = "p-3 bg-amber-950/40 border border-amber-900 rounded-xl text-xs";
                 div.innerHTML = `
@@ -379,10 +517,17 @@ class Plant:
             });
         }
 
-        // addPlantToGrid(pos: int 0-24, name: str)
-        // Marks a grid cell as planted (display only).
         function addPlantToGrid(pos, name) {
-            gardenPlants[pos] = name;
+            gardenPlants[pos] = "🌱";
+            renderGarden();
+        }
+
+        function setTile(pos, emoji) {
+            gardenPlants[pos] = emoji || "🌱";
+            renderGarden();
+        }
+        function clearTile(pos) {
+            delete gardenPlants[pos];
             renderGarden();
         }
 
@@ -391,18 +536,37 @@ class Plant:
             grid.innerHTML = "";
             for (let i = 0; i < 25; i++) {
                 const cell = document.createElement("div");
-                cell.className = "aspect-square bg-[#2a3825] rounded-xl flex items-center justify-center text-3xl border border-emerald-800";
-                cell.textContent = gardenPlants[i] ? "🌱" : "⬜";
+                cell.className = "aspect-square bg-[#2a3825] rounded-xl flex items-center justify-center text-3xl border border-emerald-800 cursor-pointer hover:border-emerald-500 transition-colors";
+                cell.textContent = gardenPlants[i] ? gardenPlants[i] : "⬜";
+                cell.dataset.pos = i;
+                cell.addEventListener("click", () => onTileClick(i));
                 grid.appendChild(cell);
             }
         }
 
-        // updateResources(water, seeds, energy, hope, coins)
-        // Or pass a single object: updateResources({"water": n, "seeds": n, ...})
-        // No fallbacks that turn a valid 0 into a default. Caps used only for bar width.
+        async function onTileClick(pos) {
+            if (!pyodideInstance) {
+                showToast("Run the Topic 3 code first.");
+                return;
+            }
+            const fn = pyodideInstance.globals.get("handle_tile_click");
+            if (!fn) {
+                showToast("Run the Topic 3 code first.");
+                return;
+            }
+            const select = document.getElementById("crop-selector");
+            const cropName = select && select.value ? select.value : "";
+            try {
+                await fn(pos, cropName);
+            } catch (err) {
+                console.error(err);
+                showToast("Python error: " + (err.message || err));
+            }
+        }
+
         function updateResources(water, seeds, energy, hope, coins) {
             if (typeof water === "object" && water !== null) {
-                const args = water;
+                const args = (typeof water.toJs === "function") ? water.toJs() : water;
                 water = args.water !== undefined ? args.water : 0;
                 seeds = args.seeds !== undefined ? args.seeds : 0;
                 energy = args.energy !== undefined ? args.energy : 0;
@@ -427,21 +591,26 @@ class Plant:
             document.getElementById("coins-text").innerText = `${coins} Coins`;
         }
 
-        // addPlantsToDropdown(plants: list of [name, emoji, cost])
         function addPlantsToDropdown(plants) {
             const select = document.getElementById("crop-selector");
             select.innerHTML = "";
             if (!plants) return;
-            plants.forEach(([name, emoji, cost]) => {
+            const list = (typeof plants.toJs === "function") ? plants.toJs() : plants;
+            list.forEach(entry => {
+                const arr = (entry && typeof entry.toJs === "function") ? entry.toJs() : entry;
+                const name = arr[0];
+                const emoji = arr[1];
+                const cost = arr[2];
+                const qty = arr.length > 3 ? arr[3] : null;
                 const option = document.createElement("option");
                 option.value = name;
-                option.textContent = `${emoji} ${name} (${cost}c)`;
+                option.textContent = qty !== null && qty !== undefined
+                    ? `${emoji} ${name} (${cost}c) x${qty}`
+                    : `${emoji} ${name} (${cost}c)`;
                 select.appendChild(option);
             });
         }
 
-        // pushAction(action: str)
-        // Appends a display label to the Action History panel (no JS undo logic).
         function pushAction(action) {
             displayActionHistory.push(action);
             if (displayActionHistory.length > 8) displayActionHistory.shift();
@@ -459,7 +628,6 @@ class Plant:
             });
         }
 
-        // UI-only: removes the last displayed label. Your Python owns the real stack.
         function triggerUndo() {
             if (displayActionHistory.length > 0) {
                 const undone = displayActionHistory.pop();
@@ -509,7 +677,6 @@ class Plant:
             lucide.createIcons();
             renderGarden();
             renderActionStack();
-            // Resources stay at 0 until your Python calls updateResources(...)
             updateResources(0, 0, 0, 0, 0);
 
             const select = document.getElementById("topic-selector");
@@ -521,7 +688,6 @@ class Plant:
             });
             loadTopic();
             switchTab("game");
-            // Pre-load Pyodide in the background so the first Run is faster
             initPyodide().catch(() => {});
         };
     </script>
