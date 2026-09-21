@@ -1,6 +1,14 @@
 <!--
 # Changelog
 
+## [0.2.0] - 2026-09-21
+### Added
+- Topic 1 (Action History Stack) and Topic 2 (Climate Queue) Python code
+### Changed
+- Student Code Editor is read-only; code is edited only in index.html
+### Removed
+- localStorage saving, so the editor always shows the code that is in index.html
+
 ## [0.1.0] - 2026-09-21
 ### Removed
 - Temporary unlock system (locked/unlocked classes, unlockFeature())
@@ -112,7 +120,7 @@
                 <button onclick="switchTab('game')" id="tab-game" class="px-4 py-1.5 rounded-lg text-xs font-bold bg-[#283623] text-emerald-100">Interactive Sanctuary</button>
                 <button onclick="switchTab('code')" id="tab-code" class="px-4 py-1.5 rounded-lg text-xs font-bold text-emerald-400/80 hover:text-emerald-100">Student Code Editor</button>
             </div>
-      
+
             <div id="view-game" class="glass-panel rounded-2xl p-6 min-h-[380px]">
                 <div class="flex items-center justify-between mb-4">
                     <div>
@@ -132,7 +140,7 @@
                     <i data-lucide="code" class="w-5 h-5 text-emerald-400"></i> Student Code Editor (Lab)
                 </h2>
                 <select id="topic-selector" onchange="loadTopic()" class="w-full bg-[#1b2219] border border-emerald-700 rounded-xl p-3 mb-4 text-sm"></select>
-                <textarea id="code-editor" class="flex-1 bg-[#0a0f0a] border border-emerald-800 rounded-xl p-4 code-font text-sm font-medium leading-relaxed" spellcheck="false"></textarea>
+                <textarea id="code-editor" readonly class="flex-1 bg-[#0a0f0a] border border-emerald-800 rounded-xl p-4 code-font text-sm font-medium leading-relaxed" spellcheck="false"></textarea>
                 <button onclick="runPythonCode()" class="mt-4 bg-emerald-600 hover:bg-emerald-500 py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2">
                     <i data-lucide="play" class="w-4 h-4"></i> Run Python Code
                 </button>
@@ -167,10 +175,9 @@
         // PATCH: bug fix or small tweak with no new feature
         // Use 0.x.y while in development; move to 1.0.0 once all 11 topics are complete.
         // =====================================================================
-        const APP_VERSION = "0.1.0";
+        const APP_VERSION = "0.2.0";
 
         let pyodideInstance = null;
-        let savedCode = JSON.parse(localStorage.getItem("savedDSACode")) || {};
         let gardenPlants = {};
         // Display-only list of action labels (populated by Python via pushAction). No JS game logic.
         let displayActionHistory = [];
@@ -183,23 +190,87 @@
             1: {
                 title: "Python OOP + Big O + Stacks",
                 code: `# Topic 1: Python OOP + Big O + Stacks
-# ==== WRITE YOUR CODE HERE ====
-# Use pushAction(action_str) to display history entries.
-# Use updateResources(...) to set resource values.
+class ActionHistoryStack:
+    def __init__(self):
+        self.stack = []
+
+    def push_action(self, action_string):
+        self.stack.append(action_string)
+        pushAction(action_string)
+
+    def pop_action(self):
+        if not self.is_empty():
+            item = self.stack.pop()
+            return item
+
+    def peek(self):
+        if not self.is_empty():
+            top = self.stack[-1]
+            return top
+        else:
+            print("Stack is empty")
+            return None
+
+    def is_empty(self):
+        return len(self.stack) == 0
+
+
+stack = ActionHistoryStack()
+stack.push_action("Planted")
+stack.push_action("Harvested")
+
+print("Action History Stack ready! (push, pop & peek tested)")
 `
             },
             2: {
                 title: "Queues & Deques (FIFO Elements)",
                 code: `# Topic 2: Queues & Deques (FIFO Elements)
-# ==== WRITE YOUR CODE HERE ====
-# Use updateClimateQueue(list_of_event_strings) to display the FIFO queue.
+from collections import deque
+
+class ClimateQueue:
+    def __init__(self):
+        self.queue = deque()
+
+    def add_challenge(self, event_name):
+        self.queue.append(event_name)
+
+    def process_hazard(self):
+        if self.queue:
+            return self.queue.popleft()
+
+q = ClimateQueue()
+q.add_challenge("La Niña")
+q.add_challenge("El Niño")
+q.add_challenge("Extreme Flood")
+
+updateClimateQueue(list(q.queue))
+print("Climate Queue (FIFO) ready!")
 `
             },
             3: {
                 title: "Static/Dynamic Arrays, 2D Lists, & Memory Structures",
                 code: `# Topic 3: Static/Dynamic Arrays, 2D Lists, & Memory Structures
-# ==== WRITE YOUR CODE HERE ====
-# Use addPlantToGrid(pos, name) and addPlantsToDropdown(plants) for the garden grid.
+class Plant:
+    def __init__(self, name, water_need):
+        self.name = name
+        self.water_need = water_need
+        self.health = 100
+
+    updateResources(
+        water = 200,
+        seeds = 90,
+        energy = 110,
+        hope = 80,
+        coins = 999
+        )
+
+    addPlantsToDropdown ([
+        ("Sunflower", "🌻", 999),
+        ("Rose", "🌹", 150),
+        ("Daisy", "🌼", 500),
+    ])
+
+    print("Resource Storage and Plant dropdown unclocked!")
 `
             },
             4: {
@@ -413,10 +484,6 @@
             try {
                 await initPyodide();
                 const code = document.getElementById("code-editor").value.trim();
-                const key = document.getElementById("topic-selector").value;
-                // Persist editor contents so your work survives reloads
-                savedCode[key] = code;
-                localStorage.setItem("savedDSACode", JSON.stringify(savedCode));
                 await pyodideInstance.runPythonAsync(code);
             } catch (err) {
                 consoleEl.innerHTML += `<span class="text-red-400">Error: ${err.message}</span>`;
@@ -425,7 +492,7 @@
 
         function loadTopic() {
             const key = document.getElementById("topic-selector").value;
-            document.getElementById("code-editor").value = savedCode[key] || topicTemplates[key].code;
+            document.getElementById("code-editor").value = topicTemplates[key].code;
         }
 
         function switchTab(tab) {
@@ -460,4 +527,3 @@
     </script>
 </body>
 </html>
-
