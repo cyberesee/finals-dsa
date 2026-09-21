@@ -1,6 +1,13 @@
 <!--
 # Changelog
 
+## [0.3.1] - 2026-09-21
+### Changed
+- Topic 3: growth/size prints, short memory demo, update_display after harvest
+- Console write keeps newlines so each print appears on its own line
+### Fixed
+- "not found" plant message clarifies out-of-seeds case
+
 ## [0.3.0] - 2026-09-21
 ### Added
 - Topic 3 (Static/Dynamic Arrays, 2D Lists, & Memory Structures) Python code
@@ -181,7 +188,7 @@
         // PATCH: bug fix or small tweak with no new feature
         // Use 0.x.y while in development; move to 1.0.0 once all 11 topics are complete.
         // =====================================================================
-        const APP_VERSION = "0.3.0";
+        const APP_VERSION = "0.3.1";
 
         let pyodideInstance = null;
         let gardenPlants = {};
@@ -270,7 +277,9 @@ class DynamicArray:
 
     def grow(self):
         # O(n) - copy everything into a list twice as big
+        old_capacity = self.capacity
         self.capacity = self.capacity * 2
+        print("  Growing array: " + str(old_capacity) + " -> " + str(self.capacity))
         bigger = [None] * self.capacity
         for i in range(self.size):
             bigger[i] = self.data[i]
@@ -344,12 +353,13 @@ def handle_tile_click(pos, crop_name):
         grid.cells[row][col] = None
         clearTile(pos)
         pushAction("Harvested " + cell.emoji + " at (" + str(row) + ", " + str(col) + ")")
+        update_display()
         return
 
     # Empty tile -> plant the selected seed
     index = seed_array.find_by_name(crop_name)
     if index < 0:
-        print("Cannot plant: " + str(crop_name) + " is not in the seed array.")
+        print("Cannot plant: " + str(crop_name) + " is not in the seed array (or is out of seeds).")
         return
 
     plant = seed_array.get(index)
@@ -364,6 +374,7 @@ def handle_tile_click(pos, crop_name):
 
 
 # Add 5 plants (the array grows from capacity 4 to 8)
+print("=== Dynamic array growth ===")
 for plant in [
     Plant("Sunflower", 10, emoji="🌻", cost=10, quantity=5),
     Plant("Rose", 12, emoji="🌹", cost=15, quantity=3),
@@ -372,6 +383,13 @@ for plant in [
     Plant("Lavender", 7, emoji="💜", cost=20, quantity=1),
 ]:
     seed_array.append(plant)
+    print("  size = " + str(seed_array.size) + "   capacity = " + str(seed_array.capacity))
+
+print("=== Memory check ===")
+print("to_index(2, 3) = " + str(grid.to_index(2, 3)))
+print("to_row_col(13) = " + str(grid.to_row_col(13)))
+for r in range(5):
+    print("  row " + str(r) + " id = " + str(id(grid.cells[r])))
 
 update_display()
 print("Garden Grid & Seed Array ready!")
@@ -482,7 +500,7 @@ Plant.setup_demo()
                     from js import document
                     class Console:
                         def write(self, text):
-                            if text and text.strip():
+                            if text:
                                 el = document.getElementById("output-console")
                                 if el:
                                     el.innerHTML += text.replace("\\n", "<br>")
