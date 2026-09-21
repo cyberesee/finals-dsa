@@ -1,6 +1,16 @@
 <!--
 # Changelog
 
+## [0.4.1] - 2026-09-21
+### Fixed
+- Life Story used tile 0 when nothing was selected (empty path); now uses clicked tile or first planted plant
+- Life Story / Harvest Scan failed on Pyodide list proxies; normalize order items to plain arrays
+- Clicking a planted tile always harvested, so Life Story could not select a plant; first click selects, second click on same tile harvests
+- Refresh from Grid and Reset gave little feedback; both now toast and update the step log / diagram
+### Changed
+- Clearer dropdown labels, button tooltips, and on-screen tip for Growth Journey controls
+- APP_VERSION 0.4.1 (patch)
+
 ## [0.4.0] - 2026-09-21
 ### Added
 - Topic 4 Growth Journey Tree: life-stage hierarchy per planted Plant
@@ -179,16 +189,17 @@
                             <button type="button" onclick="setTreeViewMode('overview')" id="btn-view-overview" class="px-3 py-1.5 rounded-lg text-xs font-bold text-emerald-400/80 hover:text-emerald-100">Garden Overview</button>
                         </div>
                         <div class="flex flex-wrap items-center gap-2 mb-3">
-                            <select id="traversal-mode" class="bg-[#1b2219] border border-emerald-700 text-emerald-100 text-sm rounded-xl px-3 py-2">
-                                <option value="day">Next Day (BFS Growth)</option>
-                                <option value="story">Life Story (Pre-order)</option>
-                                <option value="scan">Harvest Scan (Post-order)</option>
+                            <select id="traversal-mode" class="bg-[#1b2219] border border-emerald-700 text-emerald-100 text-sm rounded-xl px-3 py-2" title="Pick what Play does">
+                                <option value="day">Next Day — grow all plants one stage (BFS)</option>
+                                <option value="story">Life Story — walk one plant root→leaf (Pre-order DFS)</option>
+                                <option value="scan">Harvest Scan — find blooms/dead (Post-order DFS)</option>
                             </select>
-                            <button type="button" onclick="runTreeMode()" class="bg-emerald-600 hover:bg-emerald-500 px-3 py-2 rounded-xl text-xs font-bold text-white">Play</button>
-                            <button type="button" onclick="stepTreeMode()" class="bg-[#2a3825] hover:bg-[#34462e] border border-emerald-800 px-3 py-2 rounded-xl text-xs font-medium text-emerald-200">Step</button>
-                            <button type="button" onclick="resetTreePlayback()" class="bg-[#2a3825] hover:bg-[#34462e] border border-emerald-800 px-3 py-2 rounded-xl text-xs font-medium text-emerald-200">Reset</button>
-                            <button type="button" onclick="callRefreshTree()" class="bg-[#2a3825] hover:bg-[#34462e] border border-emerald-800 px-3 py-2 rounded-xl text-xs font-medium text-emerald-200">Refresh from Grid</button>
+                            <button type="button" onclick="runTreeMode()" class="bg-emerald-600 hover:bg-emerald-500 px-3 py-2 rounded-xl text-xs font-bold text-white" title="Run the selected mode">Play</button>
+                            <button type="button" onclick="stepTreeMode()" class="bg-[#2a3825] hover:bg-[#34462e] border border-emerald-800 px-3 py-2 rounded-xl text-xs font-medium text-emerald-200" title="One step of Life Story or Harvest Scan">Step</button>
+                            <button type="button" onclick="resetTreePlayback()" class="bg-[#2a3825] hover:bg-[#34462e] border border-emerald-800 px-3 py-2 rounded-xl text-xs font-medium text-emerald-200" title="Clear highlights and the step log">Reset</button>
+                            <button type="button" onclick="callRefreshTree()" class="bg-[#2a3825] hover:bg-[#34462e] border border-emerald-800 px-3 py-2 rounded-xl text-xs font-medium text-emerald-200" title="Rebuild the diagram from the live grid">Refresh from Grid</button>
                         </div>
+                        <p id="tree-hint" class="text-[10px] text-emerald-400/70 mb-2">Tip: click a planted tile to select it for Life Story. Play runs the mode in the dropdown.</p>
                         <div id="tree-diagram" class="bg-[#0a0f0a]/70 border border-emerald-900/50 rounded-xl p-2 overflow-auto max-h-72 mb-2">
                             <span class="text-emerald-500/60 text-xs p-2 block">Run Topic 12 → 3 → plant tiles → Topic 4, then Refresh or Advance Day.</span>
                         </div>
@@ -235,7 +246,7 @@
         </section>
     </main>
     <script>
-        const APP_VERSION = "0.4.0";
+        const APP_VERSION = "0.4.1";
 
         let pyodideInstance = null;
         let gardenPlants = {};
@@ -701,11 +712,18 @@ def advanceGardenDay():
 
 
 def narrate_journey(pos):
+    pos = int(pos)
     if pos not in forest.trees:
-        print("No growth tree at pos " + str(pos))
-        return []
+        # try string keys just in case
+        if str(pos) in forest.trees:
+            pos = str(pos)
+        else:
+            print("No growth tree at pos " + str(pos) + ". Planted positions: " + str(list(forest.trees.keys())))
+            return []
     tree = forest.trees[pos]
-    return tree.preorder_ids()
+    order = tree.preorder_ids()
+    print("Life Story at pos " + str(pos) + ": " + str(len(order)) + " stages")
+    return order
 
 
 def scan_for_action():
@@ -722,16 +740,20 @@ def scan_for_action():
                 pushAction("Harvest-ready at pos " + str(pos))
             if status == "dead":
                 pushAction("Dead plant flagged at pos " + str(pos))
+    print("Harvest Scan: " + str(len(results)) + " unlocked nodes")
     return results
 
 
 def run_life_story(pos):
-    order = narrate_journey(int(pos))
-    return order
+    return narrate_journey(int(pos))
 
 
 def run_harvest_scan():
     return scan_for_action()
+
+
+def list_planted_positions():
+    return list(forest.trees.keys())
 
 
 # Rebuild for any plants already on grid
@@ -902,25 +924,42 @@ Plant.setup_demo()
 
         async function onTileClick(pos) {
             if (!pyodideInstance) {
-                showToast("Run the Topic 3 code first.");
+                showToast("Run Topic 3 first (Student Code Editor).");
                 return;
             }
             const fn = pyodideInstance.globals.get("handle_tile_click");
             if (!fn) {
-                showToast("Run the Topic 3 code first.");
+                showToast("Run Topic 3 first (Student Code Editor).");
                 return;
             }
-            // If already planted, select that plant for single-tree view
+
+            // Planted tile: first click selects for Growth Journey (no harvest).
+            // Second click on the SAME tile harvests/clears it.
             if (gardenPlants[pos]) {
-                selectedTreePos = pos;
-                treeViewMode = "single";
-                updateViewModeButtons();
-                if (lastForestJson) updateTreeView(lastForestJson);
+                if (selectedTreePos !== pos) {
+                    selectedTreePos = pos;
+                    treeViewMode = "single";
+                    updateViewModeButtons();
+                    if (lastForestJson) updateTreeView(lastForestJson);
+                    const hint = document.getElementById("tree-hint");
+                    if (hint) {
+                        hint.textContent = "Selected tile " + pos + " — Play Life Story to narrate it, or click again to harvest.";
+                    }
+                    showToast("Selected tile " + pos + " for Life Story (click again to harvest)");
+                    return;
+                }
+                // same tile selected again → fall through to harvest
             }
+
             const select = document.getElementById("crop-selector");
             const cropName = select && select.value ? select.value : "";
             try {
                 await fn(pos, cropName);
+                // After planting an empty cell, select the new plant
+                if (gardenPlants[pos] && selectedTreePos !== pos) {
+                    selectedTreePos = pos;
+                    if (lastForestJson) updateTreeView(lastForestJson);
+                }
             } catch (err) {
                 console.error(err);
                 showToast("Python error: " + (err.message || err));
@@ -1189,69 +1228,211 @@ Plant.setup_demo()
             }
         }
 
+        function normalizeOrderItem(item) {
+            // Pyodide may return a Proxy list/tuple — force plain [id, stage, ...]
+            const row = pyToPlain(item);
+            if (Array.isArray(row)) {
+                return [String(row[0]), String(row[1] != null ? row[1] : ""), row[2], row[3]];
+            }
+            if (row && typeof row === "object") {
+                const vals = Object.values(row);
+                return [String(vals[0]), String(vals[1] != null ? vals[1] : ""), vals[2], vals[3]];
+            }
+            return [String(row), "", null, null];
+        }
+
+        function firstPlantedPosFromForest() {
+            if (!lastForestJson) return null;
+            const data = pyToPlain(lastForestJson);
+            const plants = (data && data.plants) ? data.plants.map(pyToPlain) : [];
+            if (plants.length === 0) return null;
+            return plants[0].pos;
+        }
+
         async function callRefreshTree() {
-            if (!pyodideInstance) { showToast("Run Topic 4 first."); return; }
+            if (!pyodideInstance) {
+                showToast("Run Topic 4 first (Student Code Editor).");
+                return;
+            }
             const fn = pyodideInstance.globals.get("refresh_tree");
-            if (!fn) { showToast("Run Topic 4 first."); return; }
-            try { await fn(); } catch (e) { showToast("" + e); }
+            if (!fn) {
+                showToast("Run Topic 4 first (Student Code Editor).");
+                return;
+            }
+            try {
+                await fn();
+                const steps = document.getElementById("traversal-steps");
+                if (steps) {
+                    steps.innerHTML = "";
+                    const div = document.createElement("div");
+                    div.className = "bg-emerald-950/60 border-l-2 border-emerald-400 px-3 py-2 rounded text-xs text-emerald-100";
+                    div.textContent = "→ Diagram refreshed from live grid";
+                    steps.appendChild(div);
+                }
+                showToast("Tree refreshed from grid");
+            } catch (e) {
+                showToast("Refresh error: " + (e.message || e));
+            }
         }
 
         async function runTreeMode() {
-            if (!pyodideInstance) { showToast("Run Topic 4 first."); return; }
+            if (!pyodideInstance) {
+                showToast("Run Topic 4 first (Student Code Editor).");
+                return;
+            }
             const mode = document.getElementById("traversal-mode").value;
-            document.getElementById("traversal-steps").innerHTML = "";
+            const stepsEl = document.getElementById("traversal-steps");
+            if (stepsEl) stepsEl.innerHTML = "";
+            playbackPlaying = false;
+            playbackOrder = [];
+            playbackIndex = 0;
+
             try {
                 if (mode === "day") {
                     const fn = pyodideInstance.globals.get("advanceGardenDay");
-                    if (!fn) { showToast("Run Topic 4 first."); return; }
+                    if (!fn) {
+                        showToast("Run Topic 4 first.");
+                        return;
+                    }
                     const day = await fn();
                     const d = pyToPlain(day);
                     document.getElementById("day-counter").textContent = String(d);
-                    showToast("Advanced to day " + d);
-                } else if (mode === "story") {
-                    const pos = selectedTreePos !== null ? selectedTreePos : 0;
-                    const fn = pyodideInstance.globals.get("run_life_story");
-                    if (!fn) { showToast("Run Topic 4 first."); return; }
-                    const order = pyToPlain(await fn(pos));
-                    playbackOrder = Array.from(order || []).map(pyToPlain);
-                    playbackIndex = 0;
-                    playbackPlaying = true;
-                    for (let i = 0; i < playbackOrder.length; i++) {
-                        if (!playbackPlaying) break;
-                        const item = playbackOrder[i];
-                        highlightTraversalStep(item[0], i, item[1]);
-                        await new Promise((r) => setTimeout(r, 400));
-                    }
-                    playbackPlaying = false;
-                } else {
-                    const fn = pyodideInstance.globals.get("run_harvest_scan");
-                    if (!fn) { showToast("Run Topic 4 first."); return; }
-                    const order = pyToPlain(await fn());
-                    playbackOrder = Array.from(order || []).map(pyToPlain);
-                    playbackIndex = 0;
-                    playbackPlaying = true;
-                    for (let i = 0; i < playbackOrder.length; i++) {
-                        if (!playbackPlaying) break;
-                        const item = playbackOrder[i];
-                        highlightTraversalStep(item[0], i, item[1]);
-                        await new Promise((r) => setTimeout(r, 350));
-                    }
-                    playbackPlaying = false;
+                    showToast("Day " + d + " — all plants grew one stage");
+                    return;
                 }
+
+                if (mode === "story") {
+                    let pos = selectedTreePos;
+                    if (pos === null || pos === undefined) {
+                        pos = firstPlantedPosFromForest();
+                    }
+                    if (pos === null || pos === undefined) {
+                        showToast("Plant a seed first, then click its tile (or Play Next Day).");
+                        return;
+                    }
+                    selectedTreePos = pos;
+                    treeViewMode = "single";
+                    updateViewModeButtons();
+                    if (lastForestJson) updateTreeView(lastForestJson);
+
+                    const fn = pyodideInstance.globals.get("run_life_story");
+                    if (!fn) {
+                        showToast("Run Topic 4 first.");
+                        return;
+                    }
+                    const raw = pyToPlain(await fn(Number(pos)));
+                    const list = Array.from(raw || []).map(normalizeOrderItem);
+                    if (list.length === 0) {
+                        showToast("No growth path at tile " + pos + ". Try Refresh, or click the bloom tile.");
+                        return;
+                    }
+                    playbackOrder = list;
+                    playbackIndex = 0;
+                    playbackPlaying = true;
+                    showToast("Life Story on tile " + pos + " (" + list.length + " steps)");
+                    for (let i = 0; i < playbackOrder.length; i++) {
+                        if (!playbackPlaying) break;
+                        const item = playbackOrder[i];
+                        highlightTraversalStep(item[0], i, item[1]);
+                        playbackIndex = i + 1;
+                        await new Promise((r) => setTimeout(r, 450));
+                    }
+                    playbackPlaying = false;
+                    return;
+                }
+
+                // harvest scan
+                const fn = pyodideInstance.globals.get("run_harvest_scan");
+                if (!fn) {
+                    showToast("Run Topic 4 first.");
+                    return;
+                }
+                const raw = pyToPlain(await fn());
+                const list = Array.from(raw || []).map(normalizeOrderItem);
+                if (list.length === 0) {
+                    showToast("No plants to scan. Plant seeds and advance a few days first.");
+                    return;
+                }
+                playbackOrder = list;
+                playbackIndex = 0;
+                playbackPlaying = true;
+                showToast("Harvest Scan (" + list.length + " nodes)");
+                for (let i = 0; i < playbackOrder.length; i++) {
+                    if (!playbackPlaying) break;
+                    const item = playbackOrder[i];
+                    highlightTraversalStep(item[0], i, item[1]);
+                    playbackIndex = i + 1;
+                    await new Promise((r) => setTimeout(r, 400));
+                }
+                playbackPlaying = false;
             } catch (e) {
-                showToast("Python error: " + (e.message || e));
+                console.error(e);
+                showToast("Error: " + (e.message || e));
             }
         }
 
         async function stepTreeMode() {
-            if (playbackOrder.length === 0) {
+            const mode = document.getElementById("traversal-mode").value;
+            if (mode === "day") {
+                // Step on day mode = one growth tick (same as Play for day)
                 await runTreeMode();
                 return;
+            }
+            if (playbackOrder.length === 0 || playbackIndex >= playbackOrder.length) {
+                // Load order without auto-playing all steps
+                if (!pyodideInstance) {
+                    showToast("Run Topic 4 first.");
+                    return;
+                }
+                try {
+                    if (mode === "story") {
+                        let pos = selectedTreePos !== null ? selectedTreePos : firstPlantedPosFromForest();
+                        if (pos === null) {
+                            showToast("Click a planted tile first.");
+                            return;
+                        }
+                        selectedTreePos = pos;
+                        const fn = pyodideInstance.globals.get("run_life_story");
+                        if (!fn) {
+                            showToast("Run Topic 4 first.");
+                            return;
+                        }
+                        const raw = pyToPlain(await fn(Number(pos)));
+                        playbackOrder = Array.from(raw || []).map(normalizeOrderItem);
+                        playbackIndex = 0;
+                        document.getElementById("traversal-steps").innerHTML = "";
+                        if (playbackOrder.length === 0) {
+                            showToast("No path at tile " + pos);
+                            return;
+                        }
+                        if (lastForestJson) updateTreeView(lastForestJson);
+                    } else {
+                        const fn = pyodideInstance.globals.get("run_harvest_scan");
+                        if (!fn) {
+                            showToast("Run Topic 4 first.");
+                            return;
+                        }
+                        const raw = pyToPlain(await fn());
+                        playbackOrder = Array.from(raw || []).map(normalizeOrderItem);
+                        playbackIndex = 0;
+                        document.getElementById("traversal-steps").innerHTML = "";
+                        if (playbackOrder.length === 0) {
+                            showToast("Nothing to scan yet.");
+                            return;
+                        }
+                    }
+                } catch (e) {
+                    showToast("Error: " + (e.message || e));
+                    return;
+                }
             }
             if (playbackIndex < playbackOrder.length) {
                 const item = playbackOrder[playbackIndex];
                 highlightTraversalStep(item[0], playbackIndex, item[1]);
                 playbackIndex += 1;
+                if (playbackIndex >= playbackOrder.length) {
+                    showToast("End of traversal");
+                }
             }
         }
 
@@ -1259,7 +1440,19 @@ Plant.setup_demo()
             playbackPlaying = false;
             playbackOrder = [];
             playbackIndex = 0;
-            document.getElementById("traversal-steps").innerHTML = "";
+            const steps = document.getElementById("traversal-steps");
+            if (steps) {
+                steps.innerHTML = "";
+                const div = document.createElement("div");
+                div.className = "bg-emerald-950/60 border-l-2 border-amber-500 px-3 py-2 rounded text-xs text-emerald-100";
+                div.textContent = "→ Playback cleared — pick a mode and press Play or Step";
+                steps.appendChild(div);
+            }
+            // Re-draw diagram without traversal rings
+            if (lastForestJson) {
+                updateTreeView(lastForestJson);
+            }
+            showToast("Reset — highlights and step log cleared");
         }
 
         async function runPythonCode() {
