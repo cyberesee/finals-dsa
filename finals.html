@@ -1,6 +1,13 @@
 <!--
 # Changelog
 
+## [0.4.2] - 2026-09-21
+### Added
+- Topic 3: planting subtracts plant.cost from coins; refuses if not enough coins
+### Changed
+- Plant Action History line includes price, e.g. "Planted 🌻 at (1, 2) for 10c"
+- APP_VERSION 0.4.2 (patch)
+
 ## [0.4.1] - 2026-09-21
 ### Fixed
 - Life Story used tile 0 when nothing was selected (empty path); now uses clicked tile or first planted plant
@@ -246,7 +253,7 @@
         </section>
     </main>
     <script>
-        const APP_VERSION = "0.4.1";
+        const APP_VERSION = "0.4.2";
 
         let pyodideInstance = null;
         let gardenPlants = {};
@@ -421,13 +428,20 @@ def handle_tile_click(pos, crop_name):
         return
 
     plant = seed_array.get(index)
+    price = plant.cost
+    if resources["coins"] < price:
+        print("Cannot plant: need " + str(price) + "c but only have " + str(resources["coins"]) + "c.")
+        return
+
+    # Pay first, then place the plant (so a failed pay changes nothing)
+    resources["coins"] = resources["coins"] - price
     grid.cells[row][col] = plant
     plant.quantity -= 1
     if plant.quantity == 0:
         seed_array.remove_at(index)
 
     setTile(pos, plant.emoji)
-    pushAction("Planted " + plant.emoji + " at (" + str(row) + ", " + str(col) + ")")
+    pushAction("Planted " + plant.emoji + " at (" + str(row) + ", " + str(col) + ") for " + str(price) + "c")
     if "register_growth_tree" in globals():
         register_growth_tree(int(pos), plant)
     update_display()
