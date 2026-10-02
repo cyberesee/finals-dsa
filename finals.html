@@ -1,6 +1,15 @@
 <!--
 # Changelog
 
+## [0.5.0] - 2026-10-02
+### Added
+- Topic 4: real BFS (deque), Pre-order (stack), In-order, Post-order with full/grown scope
+- Scope toggle, Compare All, visit-order badges and emoji path under the diagram
+### Fixed
+- Harvest Scan stewardship only counts once per plant
+### Changed
+- APP_VERSION 0.5.0 (minor: traversal teaching feature)
+
 ## [0.4.2] - 2026-09-21
 ### Added
 - Topic 3: planting subtracts plant.cost from coins; refuses if not enough coins
@@ -196,17 +205,28 @@
                             <button type="button" onclick="setTreeViewMode('overview')" id="btn-view-overview" class="px-3 py-1.5 rounded-lg text-xs font-bold text-emerald-400/80 hover:text-emerald-100">Garden Overview</button>
                         </div>
                         <div class="flex flex-wrap items-center gap-2 mb-3">
-                            <select id="traversal-mode" class="bg-[#1b2219] border border-emerald-700 text-emerald-100 text-sm rounded-xl px-3 py-2" title="Pick what Play does">
-                                <option value="day">Next Day — grow all plants one stage (BFS)</option>
-                                <option value="story">Life Story — walk one plant root→leaf (Pre-order DFS)</option>
-                                <option value="scan">Harvest Scan — find blooms/dead (Post-order DFS)</option>
+                            <select id="traversal-mode" onchange="updateModeHelp()" class="bg-[#1b2219] border border-emerald-700 text-emerald-100 text-sm rounded-xl px-3 py-2" title="Pick what Play does">
+                                <option value="day">Next Day — grow all plants one stage</option>
+                                <option value="story">Life Story — grown path (Pre-order)</option>
+                                <option value="scan">Harvest Scan — grown path (Post-order)</option>
+                                <option value="bfs">BFS — level order (deque)</option>
+                                <option value="preorder">DFS Pre-order — Node, Left, Right</option>
+                                <option value="inorder">DFS In-order — Left, Node, Right</option>
+                                <option value="postorder">DFS Post-order — Left, Right, Node</option>
+                            </select>
+                            <select id="traversal-scope" class="bg-[#1b2219] border border-emerald-700 text-emerald-100 text-sm rounded-xl px-3 py-2" title="Full tree includes locked future stages">
+                                <option value="full">Scope: Full tree</option>
+                                <option value="grown">Scope: Grown so far</option>
                             </select>
                             <button type="button" onclick="runTreeMode()" class="bg-emerald-600 hover:bg-emerald-500 px-3 py-2 rounded-xl text-xs font-bold text-white" title="Run the selected mode">Play</button>
-                            <button type="button" onclick="stepTreeMode()" class="bg-[#2a3825] hover:bg-[#34462e] border border-emerald-800 px-3 py-2 rounded-xl text-xs font-medium text-emerald-200" title="One step of Life Story or Harvest Scan">Step</button>
-                            <button type="button" onclick="resetTreePlayback()" class="bg-[#2a3825] hover:bg-[#34462e] border border-emerald-800 px-3 py-2 rounded-xl text-xs font-medium text-emerald-200" title="Clear highlights and the step log">Reset</button>
+                            <button type="button" onclick="stepTreeMode()" class="bg-[#2a3825] hover:bg-[#34462e] border border-emerald-800 px-3 py-2 rounded-xl text-xs font-medium text-emerald-200" title="One step of the current traversal">Step</button>
+                            <button type="button" onclick="resetTreePlayback()" class="bg-[#2a3825] hover:bg-[#34462e] border border-emerald-800 px-3 py-2 rounded-xl text-xs font-medium text-emerald-200" title="Clear highlights, badges, and the step log">Reset</button>
                             <button type="button" onclick="callRefreshTree()" class="bg-[#2a3825] hover:bg-[#34462e] border border-emerald-800 px-3 py-2 rounded-xl text-xs font-medium text-emerald-200" title="Rebuild the diagram from the live grid">Refresh from Grid</button>
+                            <button type="button" onclick="runCompareAll()" class="bg-[#2a3825] hover:bg-[#34462e] border border-emerald-800 px-3 py-2 rounded-xl text-xs font-medium text-emerald-200" title="Print all four orders for the selected plant">Compare All</button>
                         </div>
-                        <p id="tree-hint" class="text-[10px] text-emerald-400/70 mb-2">Tip: click a planted tile to select it for Life Story. Play runs the mode in the dropdown.</p>
+                        <p id="mode-help" class="text-[10px] text-emerald-300/90 mb-1">Next Day grows every plant one stage (does not run a read-only traversal).</p>
+                        <p id="tree-hint" class="text-[10px] text-emerald-400/70 mb-2">Tip: click a planted tile to select it. Use Scope Full to see locked branches in BFS/DFS.</p>
+                        <p id="visit-path" class="text-xs text-emerald-200/90 mb-2 font-mono min-h-[1.25rem]"></p>
                         <div id="tree-diagram" class="bg-[#0a0f0a]/70 border border-emerald-900/50 rounded-xl p-2 overflow-auto max-h-72 mb-2">
                             <span class="text-emerald-500/60 text-xs p-2 block">Run Topic 12 → 3 → plant tiles → Topic 4, then Refresh or Advance Day.</span>
                         </div>
@@ -253,7 +273,7 @@
         </section>
     </main>
     <script>
-        const APP_VERSION = "0.4.2";
+        const APP_VERSION = "0.5.0";
 
         let pyodideInstance = null;
         let gardenPlants = {};
@@ -264,6 +284,25 @@
         let playbackIndex = 0;
         let playbackPlaying = false;
         let lastForestJson = null;
+        let visitBadges = {};
+        let visitPathEmojis = [];
+        let lastTraversalKind = null;
+
+        const MODE_HELP = {
+            day: "Next Day grows every plant one stage (does not run a read-only traversal).",
+            story: "Life Story: pre-order on the grown path only (root toward the current leaf).",
+            scan: "Harvest Scan: post-order on grown nodes; scores each Full Bloom once.",
+            bfs: "BFS: level order with a deque — finish depth d before depth d+1. O(n).",
+            preorder: "Pre-order: Node, Left, Right (explicit stack). Top-down life story. O(n).",
+            inorder: "In-order: Left, Node, Right (recursive). Left fork, stage, right fork. O(n).",
+            postorder: "Post-order: Left, Right, Node (recursive). Children before parent. O(n)."
+        };
+
+        function updateModeHelp() {
+            const mode = document.getElementById("traversal-mode").value;
+            const el = document.getElementById("mode-help");
+            if (el) el.textContent = MODE_HELP[mode] || "";
+        }
 
         const topicTemplates = {
             1: {
@@ -473,8 +512,8 @@ print("Garden Grid & Seed Array ready!")
             4: {
                 title: "Hierarchical Trees & Traversals",
                 code: `# Topic 4: Growth Journey Tree (Hierarchical Trees & Traversals)
-# Each planted Plant has a life-stage tree. BFS = day growth.
-# Pre-order = life story. Post-order = harvest/cleanup scan.
+# BFS / Pre-order / In-order / Post-order are read-only.
+# Next Day grows each plant one stage.
 
 if "Plant" not in globals():
     print("Run Topic 12 first (it defines Plant).")
@@ -497,9 +536,14 @@ class GrowthNode:
         self.y = y
         self.status = status
         self.children = []
+        # children[0] = left, children[1] = right (if any)
+        self.left = None
+        self.right = None
 
     def add_child(self, child):
         self.children.append(child)
+        self.left = self.children[0]
+        self.right = self.children[1] if len(self.children) > 1 else None
         return child
 
 
@@ -515,29 +559,21 @@ class GrowthTree:
     def _build_potential(self):
         p = self.plant
         pos = self.grid_pos
-        # depth 0
         self.root = GrowthNode("p" + str(pos) + "-d0", "Seed", "🌰", p, 0, 200, 30, "locked")
-        # depth 1
         seedling = self.root.add_child(GrowthNode("p" + str(pos) + "-d1", "Seedling", "🌱", p, 1, 200, 100, "locked"))
-        # depth 2 fork
         thrive = seedling.add_child(GrowthNode("p" + str(pos) + "-d2a", "Thriving Sprout", "🌿", p, 2, 120, 170, "locked"))
         struggle = seedling.add_child(GrowthNode("p" + str(pos) + "-d2b", "Struggling Sprout", "🥀", p, 2, 280, 170, "locked"))
-        # depth 3
-        flower_bud = thrive.add_child(GrowthNode("p" + str(pos) + "-d3a", "Flowering Bud", "🌼", p, 3, 80, 240, "locked"))
+        flower = thrive.add_child(GrowthNode("p" + str(pos) + "-d3a", "Flowering Bud", "🌼", p, 3, 80, 240, "locked"))
         stunted = struggle.add_child(GrowthNode("p" + str(pos) + "-d3b", "Stunted Bud", "🍂", p, 3, 320, 240, "locked"))
-        # depth 4 leaves
-        flower_bud.add_child(GrowthNode("p" + str(pos) + "-d4a", "Full Bloom", "🌸", p, 4, 40, 310, "locked"))
-        flower_bud.add_child(GrowthNode("p" + str(pos) + "-d4b", "Wilted", "🥀", p, 4, 120, 310, "locked"))
+        flower.add_child(GrowthNode("p" + str(pos) + "-d4a", "Full Bloom", "🌸", p, 4, 40, 310, "locked"))
+        flower.add_child(GrowthNode("p" + str(pos) + "-d4b", "Wilted", "🥀", p, 4, 120, 310, "locked"))
         stunted.add_child(GrowthNode("p" + str(pos) + "-d4c", "Diseased", "🍄", p, 4, 280, 310, "locked"))
         stunted.add_child(GrowthNode("p" + str(pos) + "-d4d", "Dead", "💀", p, 4, 360, 310, "locked"))
 
     def care_score(self):
-        # Derive from plant health and water_need (simple live care signal)
-        h = self.plant.health if self.plant else 50
-        return h
+        return self.plant.health if self.plant else 50
 
     def advance_one_level(self):
-        # Unlock next depth based on care; mark previous path as passed
         if self.current_depth >= 4:
             return None
         from_stage = self._current_node().stage_name if self._current_node() else "Seed"
@@ -549,9 +585,9 @@ class GrowthTree:
         chosen.status = "current"
         if chosen.stage_name == "Full Bloom":
             chosen.status = "bloom"
-        if chosen.stage_name in ("Wilted", "Diseased", "Pest-Infested"):
+        elif chosen.stage_name in ("Wilted", "Diseased", "Pest-Infested"):
             chosen.status = "problem"
-        if chosen.stage_name == "Dead":
+        elif chosen.stage_name == "Dead":
             chosen.status = "dead"
         setTile(self.grid_pos, chosen.emoji)
         pushAction("Grew " + from_stage + " -> " + chosen.stage_name + " at pos " + str(self.grid_pos))
@@ -560,23 +596,21 @@ class GrowthTree:
 
     def _current_node(self):
         node = self.root
-        if self.current_depth == 0:
-            return node
         depth = 0
         while depth < self.current_depth:
-            next_unlocked = None
+            nxt = None
             for c in node.children:
                 if c.status in ("current", "passed", "bloom", "problem", "dead"):
-                    next_unlocked = c
+                    nxt = c
                     break
-            if next_unlocked is None:
+            if nxt is None:
                 for c in node.children:
                     if c.status == "locked":
-                        next_unlocked = c
+                        nxt = c
                         break
-            if next_unlocked is None:
+            if nxt is None:
                 return node
-            node = next_unlocked
+            node = nxt
             depth += 1
         return node
 
@@ -586,17 +620,18 @@ class GrowthTree:
             node.status = "passed"
         depth = 0
         while depth < self.current_depth:
+            found = False
             for c in node.children:
                 if c.status == "current":
                     c.status = "passed"
                     node = c
+                    found = True
                     break
-            else:
+            if not found:
                 break
             depth += 1
 
     def _choose_child_at_depth(self, depth):
-        # Walk to parent of target depth, pick care-based fork
         parent = self.root
         d = 0
         while d < depth - 1:
@@ -614,31 +649,92 @@ class GrowthTree:
             return None
         if len(kids) == 1:
             return kids[0]
-        # care_score high -> first (thriving) branch; low -> second
-        if self.care_score() >= 60:
-            return kids[0]
-        return kids[1]
+        return kids[0] if self.care_score() >= 60 else kids[1]
+
+    def _ok(self, node, scope):
+        # full = every node; grown = skip locked
+        if scope == "grown":
+            return node.status != "locked"
+        return True
+
+    def _row(self, node, level):
+        return [node.node_id, node.stage_name, node.status, level]
+
+    def bfs(self, scope="full"):
+        # Level order with deque. O(n) time, O(n) queue space.
+        order = []
+        if self.root is None:
+            return order
+        q = deque()
+        q.append((self.root, 0))
+        while len(q) > 0:
+            node, level = q.popleft()
+            if self._ok(node, scope):
+                order.append(self._row(node, level))
+            # always enqueue children so full tree is explored
+            if node.left is not None:
+                q.append((node.left, level + 1))
+            if node.right is not None:
+                q.append((node.right, level + 1))
+        # if grown, drop locked rows we still walked past
+        if scope == "grown":
+            kept = []
+            for r in order:
+                if r[2] != "locked":
+                    kept.append(r)
+            order = kept
+        return order
+
+    def preorder(self, scope="full"):
+        # Node, Left, Right — explicit stack. O(n) time, O(h) space.
+        order = []
+        stack = [self.root]
+        while len(stack) > 0:
+            node = stack.pop()
+            if node is None or not self._ok(node, scope):
+                continue
+            order.append(self._row(node, node.depth))
+            if node.right is not None:
+                stack.append(node.right)
+            if node.left is not None:
+                stack.append(node.left)
+        return order
+
+    def inorder(self, scope="full"):
+        # Left, Node, Right — recursive. O(n) time, O(h) space.
+        order = []
+        def walk(node):
+            if node is None or not self._ok(node, scope):
+                return
+            walk(node.left)
+            order.append(self._row(node, node.depth))
+            walk(node.right)
+        walk(self.root)
+        return order
+
+    def postorder(self, scope="full"):
+        # Left, Right, Node — recursive. O(n) time, O(h) space.
+        order = []
+        def walk(node):
+            if node is None or not self._ok(node, scope):
+                return
+            walk(node.left)
+            walk(node.right)
+            order.append(self._row(node, node.depth))
+        walk(self.root)
+        return order
 
     def preorder_ids(self):
-        order = []
-        def walk(n):
-            if n.status == "locked":
-                return
-            order.append([n.node_id, n.stage_name])
-            for c in n.children:
-                walk(c)
-        walk(self.root)
-        return order
+        out = []
+        for r in self.preorder("grown"):
+            out.append([r[0], r[1]])
+        return out
 
     def postorder_ids(self):
-        order = []
-        def walk(n):
-            for c in n.children:
-                walk(c)
-            if n.status != "locked":
-                order.append([n.node_id, n.stage_name, n.status])
-        walk(self.root)
-        return order
+        out = []
+        for r in self.postorder("grown"):
+            out.append([r[0], r[1], r[2]])
+        return out
 
     def to_json(self):
         def walk(n):
@@ -666,6 +762,7 @@ class GrowthTree:
 class GardenGrowthForest:
     def __init__(self):
         self.trees = {}
+        self.scored_blooms = {}
 
     def add(self, pos, plant):
         self.trees[pos] = GrowthTree(plant, pos)
@@ -673,13 +770,33 @@ class GardenGrowthForest:
     def remove(self, pos):
         if pos in self.trees:
             del self.trees[pos]
+        if pos in self.scored_blooms:
+            del self.scored_blooms[pos]
 
     def advance_day(self):
-        # BFS-style: every plant advances exactly one level this day
+        # One day = one growth depth for every plant
         for pos in list(self.trees.keys()):
-            tree = self.trees[pos]
-            tree.advance_one_level()
+            self.trees[pos].advance_one_level()
         refresh_tree()
+
+    def bfs_garden(self, scope="full"):
+        # Queue starts with every plant root
+        order = []
+        q = deque()
+        for pos in sorted(self.trees.keys()):
+            root = self.trees[pos].root
+            if root is not None:
+                q.append((root, 0, pos))
+        while len(q) > 0:
+            node, level, pos = q.popleft()
+            if scope == "grown" and node.status == "locked":
+                continue
+            order.append([node.node_id, node.stage_name, node.status, level, pos])
+            if node.left is not None:
+                q.append((node.left, level + 1, pos))
+            if node.right is not None:
+                q.append((node.right, level + 1, pos))
+        return order
 
     def to_json(self):
         plants = []
@@ -705,7 +822,6 @@ def remove_growth_tree(pos):
 
 
 def refresh_tree():
-    # Sync forest with grid: drop trees for empty cells; keep existing growth
     for r in range(5):
         for c in range(5):
             pos = r * 5 + c
@@ -721,21 +837,20 @@ def advanceGardenDay():
     global garden_day
     garden_day += 1
     forest.advance_day()
-    pushAction("Day " + str(garden_day) + " growth tick (BFS)")
+    level_note = "?"
+    if len(forest.trees) > 0:
+        pos = sorted(forest.trees.keys())[0]
+        level_note = str(forest.trees[pos].current_depth)
+    pushAction("Day " + str(garden_day) + " reveals level " + level_note)
     return garden_day
 
 
 def narrate_journey(pos):
     pos = int(pos)
     if pos not in forest.trees:
-        # try string keys just in case
-        if str(pos) in forest.trees:
-            pos = str(pos)
-        else:
-            print("No growth tree at pos " + str(pos) + ". Planted positions: " + str(list(forest.trees.keys())))
-            return []
-    tree = forest.trees[pos]
-    order = tree.preorder_ids()
+        print("No growth tree at pos " + str(pos))
+        return []
+    order = forest.trees[pos].preorder_ids()
     print("Life Story at pos " + str(pos) + ": " + str(len(order)) + " stages")
     return order
 
@@ -745,11 +860,10 @@ def scan_for_action():
     for pos in sorted(forest.trees.keys()):
         tree = forest.trees[pos]
         for item in tree.postorder_ids():
-            node_id = item[0]
-            stage = item[1]
-            status = item[2]
+            node_id, stage, status = item[0], item[1], item[2]
             results.append([node_id, stage, status, pos])
-            if status == "bloom":
+            if status == "bloom" and pos not in forest.scored_blooms:
+                forest.scored_blooms[pos] = True
                 flagHarvestReady(pos)
                 pushAction("Harvest-ready at pos " + str(pos))
             if status == "dead":
@@ -770,9 +884,54 @@ def list_planted_positions():
     return list(forest.trees.keys())
 
 
-# Rebuild for any plants already on grid
+def run_traversal(pos, kind, scope):
+    # kind: bfs | preorder | inorder | postorder
+    # scope: full | grown   (read-only)
+    pos = int(pos)
+    if pos not in forest.trees:
+        print("No tree at pos " + str(pos))
+        return []
+    if scope != "grown":
+        scope = "full"
+    tree = forest.trees[pos]
+    if kind == "bfs":
+        rows = tree.bfs(scope)
+    elif kind == "preorder":
+        rows = tree.preorder(scope)
+    elif kind == "inorder":
+        rows = tree.inorder(scope)
+    elif kind == "postorder":
+        rows = tree.postorder(scope)
+    else:
+        print("Unknown kind: " + str(kind))
+        return []
+    print(str(kind) + " (" + scope + ") at pos " + str(pos) + ": " + str(len(rows)) + " nodes")
+    return rows
+
+
+def run_compare(pos):
+    pos = int(pos)
+    if pos not in forest.trees:
+        print("No tree at pos " + str(pos))
+        return {}
+    tree = forest.trees[pos]
+    out = {
+        "bfs": tree.bfs("full"),
+        "preorder": tree.preorder("full"),
+        "inorder": tree.inorder("full"),
+        "postorder": tree.postorder("full")
+    }
+    print("=== Compare All (full) pos " + str(pos) + " ===")
+    for key in ["bfs", "preorder", "inorder", "postorder"]:
+        names = []
+        for r in out[key]:
+            names.append(r[1])
+        print(key + ": " + " -> ".join(names))
+    return out
+
+
 refresh_tree()
-print("Topic 4 ready. Plant tiles, then use Growth Journey Tree: Next Day / Life Story / Harvest Scan.")
+print("Topic 4 ready. Use Next Day, Life Story, Harvest Scan, or BFS/Pre/In/Post-order.")
 `
             },
             5: {
@@ -1170,28 +1329,55 @@ Plant.setup_demo()
             }
         }
 
-        function highlightTraversalStep(nodeId, stepIndex, stageName) {
-            document.querySelectorAll("[id^='gn-'] circle").forEach((c) => {
-                /* leave base styles */
-            });
+        function highlightTraversalStep(nodeId, stepIndex, stageName, emoji, level) {
             const g = document.getElementById("gn-" + nodeId);
             if (g) {
-                const ring = document.createElementNS("http://www.w3.org/2000/svg", "circle");
                 const main = g.querySelector("circle");
                 if (main) {
+                    const ring = document.createElementNS("http://www.w3.org/2000/svg", "circle");
                     ring.setAttribute("cx", main.getAttribute("cx"));
                     ring.setAttribute("cy", main.getAttribute("cy"));
                     ring.setAttribute("r", "26");
                     ring.setAttribute("class", "traversal-ring");
                     g.appendChild(ring);
                     setTimeout(() => ring.remove(), 900);
+
+                    if (visitBadges[nodeId] === undefined) {
+                        visitBadges[nodeId] = stepIndex + 1;
+                        const badge = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                        badge.setAttribute("x", String(Number(main.getAttribute("cx")) + 16));
+                        badge.setAttribute("y", String(Number(main.getAttribute("cy")) - 14));
+                        badge.setAttribute("fill", "#fbbf24");
+                        badge.setAttribute("font-size", "11");
+                        badge.setAttribute("font-weight", "bold");
+                        badge.setAttribute("class", "visit-badge");
+                        badge.textContent = String(stepIndex + 1);
+                        g.appendChild(badge);
+                    }
                 }
+            }
+            if (emoji) {
+                visitPathEmojis.push(emoji);
+            } else if (stageName) {
+                visitPathEmojis.push(stageName);
+            }
+            const pathEl = document.getElementById("visit-path");
+            if (pathEl) {
+                let prefix = "";
+                if (lastTraversalKind === "bfs" && level !== undefined && level !== null) {
+                    prefix = "Level " + level + ": ";
+                }
+                pathEl.textContent = prefix + visitPathEmojis.join(" → ");
             }
             const steps = document.getElementById("traversal-steps");
             if (steps) {
                 const div = document.createElement("div");
                 div.className = "bg-emerald-950/60 border-l-2 border-amber-500 px-3 py-2 rounded text-xs text-emerald-100";
-                div.textContent = "→ [" + stepIndex + "] " + (stageName || nodeId);
+                let label = "→ [" + stepIndex + "] " + (stageName || nodeId);
+                if (lastTraversalKind === "bfs" && level !== undefined && level !== null) {
+                    label = "→ [" + stepIndex + "] L" + level + " " + (stageName || nodeId);
+                }
+                div.textContent = label;
                 steps.appendChild(div);
                 steps.scrollTop = steps.scrollHeight;
             }
@@ -1289,17 +1475,66 @@ Plant.setup_demo()
             }
         }
 
+        function stageEmojiFromForest(nodeId) {
+            if (!lastForestJson) return "";
+            const data = pyToPlain(lastForestJson);
+            const plants = (data && data.plants) ? data.plants.map(pyToPlain) : [];
+            function findEmoji(node) {
+                node = pyToPlain(node);
+                if (!node) return "";
+                if (node.id === nodeId) return node.emoji || "";
+                const kids = node.children || [];
+                for (let i = 0; i < kids.length; i++) {
+                    const e = findEmoji(kids[i]);
+                    if (e) return e;
+                }
+                return "";
+            }
+            for (let i = 0; i < plants.length; i++) {
+                const e = findEmoji(plants[i].root);
+                if (e) return e;
+            }
+            return "";
+        }
+
+        async function playOrderList(list, kind) {
+            lastTraversalKind = kind;
+            visitPathEmojis = [];
+            playbackOrder = list;
+            playbackIndex = 0;
+            playbackPlaying = true;
+            for (let i = 0; i < playbackOrder.length; i++) {
+                if (!playbackPlaying) break;
+                const item = playbackOrder[i];
+                const nodeId = item[0];
+                const stage = item[1];
+                const level = item[3];
+                const emoji = stageEmojiFromForest(nodeId);
+                highlightTraversalStep(nodeId, i, stage, emoji, level);
+                playbackIndex = i + 1;
+                await new Promise((r) => setTimeout(r, 400));
+            }
+            playbackPlaying = false;
+        }
+
         async function runTreeMode() {
             if (!pyodideInstance) {
                 showToast("Run Topic 4 first (Student Code Editor).");
                 return;
             }
             const mode = document.getElementById("traversal-mode").value;
+            const scopeEl = document.getElementById("traversal-scope");
+            const scope = scopeEl ? scopeEl.value : "full";
             const stepsEl = document.getElementById("traversal-steps");
             if (stepsEl) stepsEl.innerHTML = "";
+            visitBadges = {};
+            visitPathEmojis = [];
+            const pathEl = document.getElementById("visit-path");
+            if (pathEl) pathEl.textContent = "";
             playbackPlaying = false;
             playbackOrder = [];
             playbackIndex = 0;
+            updateModeHelp();
 
             try {
                 if (mode === "day") {
@@ -1315,70 +1550,73 @@ Plant.setup_demo()
                     return;
                 }
 
-                if (mode === "story") {
-                    let pos = selectedTreePos;
-                    if (pos === null || pos === undefined) {
-                        pos = firstPlantedPosFromForest();
-                    }
-                    if (pos === null || pos === undefined) {
-                        showToast("Plant a seed first, then click its tile (or Play Next Day).");
+                if (mode === "story" || mode === "scan") {
+                    if (mode === "story") {
+                        let pos = selectedTreePos;
+                        if (pos === null || pos === undefined) pos = firstPlantedPosFromForest();
+                        if (pos === null || pos === undefined) {
+                            showToast("Plant a seed first, then click its tile.");
+                            return;
+                        }
+                        selectedTreePos = pos;
+                        treeViewMode = "single";
+                        updateViewModeButtons();
+                        if (lastForestJson) updateTreeView(lastForestJson);
+                        const fn = pyodideInstance.globals.get("run_life_story");
+                        if (!fn) {
+                            showToast("Run Topic 4 first.");
+                            return;
+                        }
+                        const raw = pyToPlain(await fn(Number(pos)));
+                        const list = Array.from(raw || []).map(normalizeOrderItem);
+                        if (list.length === 0) {
+                            showToast("No grown path at tile " + pos);
+                            return;
+                        }
+                        showToast("Life Story on tile " + pos);
+                        await playOrderList(list, "preorder");
                         return;
                     }
-                    selectedTreePos = pos;
-                    treeViewMode = "single";
-                    updateViewModeButtons();
-                    if (lastForestJson) updateTreeView(lastForestJson);
-
-                    const fn = pyodideInstance.globals.get("run_life_story");
+                    const fn = pyodideInstance.globals.get("run_harvest_scan");
                     if (!fn) {
                         showToast("Run Topic 4 first.");
                         return;
                     }
-                    const raw = pyToPlain(await fn(Number(pos)));
+                    const raw = pyToPlain(await fn());
                     const list = Array.from(raw || []).map(normalizeOrderItem);
                     if (list.length === 0) {
-                        showToast("No growth path at tile " + pos + ". Try Refresh, or click the bloom tile.");
+                        showToast("No plants to scan.");
                         return;
                     }
-                    playbackOrder = list;
-                    playbackIndex = 0;
-                    playbackPlaying = true;
-                    showToast("Life Story on tile " + pos + " (" + list.length + " steps)");
-                    for (let i = 0; i < playbackOrder.length; i++) {
-                        if (!playbackPlaying) break;
-                        const item = playbackOrder[i];
-                        highlightTraversalStep(item[0], i, item[1]);
-                        playbackIndex = i + 1;
-                        await new Promise((r) => setTimeout(r, 450));
-                    }
-                    playbackPlaying = false;
+                    showToast("Harvest Scan (" + list.length + " nodes)");
+                    await playOrderList(list, "postorder");
                     return;
                 }
 
-                // harvest scan
-                const fn = pyodideInstance.globals.get("run_harvest_scan");
+                let pos = selectedTreePos;
+                if (pos === null || pos === undefined) pos = firstPlantedPosFromForest();
+                if (pos === null || pos === undefined) {
+                    showToast("Plant a seed first, then click its tile.");
+                    return;
+                }
+                selectedTreePos = pos;
+                treeViewMode = "single";
+                updateViewModeButtons();
+                if (lastForestJson) updateTreeView(lastForestJson);
+
+                const fn = pyodideInstance.globals.get("run_traversal");
                 if (!fn) {
                     showToast("Run Topic 4 first.");
                     return;
                 }
-                const raw = pyToPlain(await fn());
+                const raw = pyToPlain(await fn(Number(pos), mode, scope));
                 const list = Array.from(raw || []).map(normalizeOrderItem);
                 if (list.length === 0) {
-                    showToast("No plants to scan. Plant seeds and advance a few days first.");
+                    showToast("Empty traversal — try Scope: Full tree.");
                     return;
                 }
-                playbackOrder = list;
-                playbackIndex = 0;
-                playbackPlaying = true;
-                showToast("Harvest Scan (" + list.length + " nodes)");
-                for (let i = 0; i < playbackOrder.length; i++) {
-                    if (!playbackPlaying) break;
-                    const item = playbackOrder[i];
-                    highlightTraversalStep(item[0], i, item[1]);
-                    playbackIndex = i + 1;
-                    await new Promise((r) => setTimeout(r, 400));
-                }
-                playbackPlaying = false;
+                showToast(mode + " (" + scope + ") — " + list.length + " nodes");
+                await playOrderList(list, mode);
             } catch (e) {
                 console.error(e);
                 showToast("Error: " + (e.message || e));
@@ -1388,53 +1626,52 @@ Plant.setup_demo()
         async function stepTreeMode() {
             const mode = document.getElementById("traversal-mode").value;
             if (mode === "day") {
-                // Step on day mode = one growth tick (same as Play for day)
                 await runTreeMode();
                 return;
             }
             if (playbackOrder.length === 0 || playbackIndex >= playbackOrder.length) {
-                // Load order without auto-playing all steps
                 if (!pyodideInstance) {
                     showToast("Run Topic 4 first.");
                     return;
                 }
                 try {
-                    if (mode === "story") {
-                        let pos = selectedTreePos !== null ? selectedTreePos : firstPlantedPosFromForest();
-                        if (pos === null) {
-                            showToast("Click a planted tile first.");
-                            return;
-                        }
-                        selectedTreePos = pos;
-                        const fn = pyodideInstance.globals.get("run_life_story");
-                        if (!fn) {
-                            showToast("Run Topic 4 first.");
-                            return;
-                        }
-                        const raw = pyToPlain(await fn(Number(pos)));
-                        playbackOrder = Array.from(raw || []).map(normalizeOrderItem);
-                        playbackIndex = 0;
-                        document.getElementById("traversal-steps").innerHTML = "";
-                        if (playbackOrder.length === 0) {
-                            showToast("No path at tile " + pos);
-                            return;
-                        }
-                        if (lastForestJson) updateTreeView(lastForestJson);
-                    } else {
-                        const fn = pyodideInstance.globals.get("run_harvest_scan");
-                        if (!fn) {
-                            showToast("Run Topic 4 first.");
-                            return;
-                        }
-                        const raw = pyToPlain(await fn());
-                        playbackOrder = Array.from(raw || []).map(normalizeOrderItem);
-                        playbackIndex = 0;
-                        document.getElementById("traversal-steps").innerHTML = "";
-                        if (playbackOrder.length === 0) {
-                            showToast("Nothing to scan yet.");
-                            return;
-                        }
+                    const scopeEl = document.getElementById("traversal-scope");
+                    const scope = scopeEl ? scopeEl.value : "full";
+                    let pos = selectedTreePos !== null ? selectedTreePos : firstPlantedPosFromForest();
+                    if (pos === null) {
+                        showToast("Click a planted tile first.");
+                        return;
                     }
+                    selectedTreePos = pos;
+                    let raw;
+                    if (mode === "story") {
+                        const fn = pyodideInstance.globals.get("run_life_story");
+                        raw = pyToPlain(await fn(Number(pos)));
+                        lastTraversalKind = "preorder";
+                    } else if (mode === "scan") {
+                        const fn = pyodideInstance.globals.get("run_harvest_scan");
+                        raw = pyToPlain(await fn());
+                        lastTraversalKind = "postorder";
+                    } else {
+                        const fn = pyodideInstance.globals.get("run_traversal");
+                        if (!fn) {
+                            showToast("Run Topic 4 first.");
+                            return;
+                        }
+                        raw = pyToPlain(await fn(Number(pos), mode, scope));
+                        lastTraversalKind = mode;
+                    }
+                    playbackOrder = Array.from(raw || []).map(normalizeOrderItem);
+                    playbackIndex = 0;
+                    visitPathEmojis = [];
+                    document.getElementById("traversal-steps").innerHTML = "";
+                    const pathEl = document.getElementById("visit-path");
+                    if (pathEl) pathEl.textContent = "";
+                    if (playbackOrder.length === 0) {
+                        showToast("Nothing to step.");
+                        return;
+                    }
+                    if (lastForestJson) updateTreeView(lastForestJson);
                 } catch (e) {
                     showToast("Error: " + (e.message || e));
                     return;
@@ -1442,7 +1679,8 @@ Plant.setup_demo()
             }
             if (playbackIndex < playbackOrder.length) {
                 const item = playbackOrder[playbackIndex];
-                highlightTraversalStep(item[0], playbackIndex, item[1]);
+                const emoji = stageEmojiFromForest(item[0]);
+                highlightTraversalStep(item[0], playbackIndex, item[1], emoji, item[3]);
                 playbackIndex += 1;
                 if (playbackIndex >= playbackOrder.length) {
                     showToast("End of traversal");
@@ -1454,6 +1692,9 @@ Plant.setup_demo()
             playbackPlaying = false;
             playbackOrder = [];
             playbackIndex = 0;
+            visitBadges = {};
+            visitPathEmojis = [];
+            lastTraversalKind = null;
             const steps = document.getElementById("traversal-steps");
             if (steps) {
                 steps.innerHTML = "";
@@ -1462,11 +1703,47 @@ Plant.setup_demo()
                 div.textContent = "→ Playback cleared — pick a mode and press Play or Step";
                 steps.appendChild(div);
             }
-            // Re-draw diagram without traversal rings
+            const pathEl = document.getElementById("visit-path");
+            if (pathEl) pathEl.textContent = "";
             if (lastForestJson) {
                 updateTreeView(lastForestJson);
             }
-            showToast("Reset — highlights and step log cleared");
+            showToast("Reset — highlights, badges, and step log cleared");
+        }
+
+        async function runCompareAll() {
+            if (!pyodideInstance) {
+                showToast("Run Topic 4 first.");
+                return;
+            }
+            let pos = selectedTreePos !== null ? selectedTreePos : firstPlantedPosFromForest();
+            if (pos === null) {
+                showToast("Click a planted tile first.");
+                return;
+            }
+            const fn = pyodideInstance.globals.get("run_compare");
+            if (!fn) {
+                showToast("Run Topic 4 first.");
+                return;
+            }
+            try {
+                const raw = pyToPlain(await fn(Number(pos)));
+                const steps = document.getElementById("traversal-steps");
+                if (steps) steps.innerHTML = "";
+                const keys = ["bfs", "preorder", "inorder", "postorder"];
+                for (let k = 0; k < keys.length; k++) {
+                    const key = keys[k];
+                    const rows = Array.from(pyToPlain(raw[key]) || []).map(normalizeOrderItem);
+                    const names = rows.map((r) => r[1]);
+                    const div = document.createElement("div");
+                    div.className = "bg-emerald-950/60 border-l-2 border-emerald-400 px-3 py-2 rounded text-xs text-emerald-100 mb-1";
+                    div.textContent = key + ": " + names.join(" → ");
+                    steps.appendChild(div);
+                }
+                showToast("Compare All printed for tile " + pos);
+            } catch (e) {
+                showToast("Error: " + (e.message || e));
+            }
         }
 
         async function runPythonCode() {
@@ -1510,6 +1787,7 @@ Plant.setup_demo()
             });
             loadTopic();
             switchTab("game");
+            if (typeof updateModeHelp === "function") updateModeHelp();
             initPyodide().catch(() => {});
         };
     </script>
